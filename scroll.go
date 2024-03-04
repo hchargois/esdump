@@ -62,7 +62,6 @@ func (d *dumper) scrollSlice(ctx context.Context, index string, sliceIdx, sliceT
 func (d *dumper) sendHits(hits []json.RawMessage) error {
 	scrolled := atomic.LoadUint64(&d.scrolled)
 	if d.count > 0 && scrolled >= d.count {
-		log.Info("scroll count reached (before sending)")
 		return errCountReached
 	}
 
@@ -72,7 +71,6 @@ func (d *dumper) sendHits(hits []json.RawMessage) error {
 
 	scrolled = atomic.AddUint64(&d.scrolled, uint64(len(hits)))
 	if d.count > 0 && scrolled >= d.count {
-		log.Info("scroll count reached (after sending)")
 		return errCountReached
 	}
 
