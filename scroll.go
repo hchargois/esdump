@@ -15,7 +15,7 @@ import (
 
 var errCountReached = errors.New("count reached")
 
-func (d *dumper) scroll(ctx context.Context, scrollers []func(context.Context) error) error {
+func scroll(ctx context.Context, scrollers []func(context.Context) error) error {
 	grp, ctx := errgroup.WithContext(ctx)
 	for _, scroller := range scrollers {
 		scroller := scroller

@@ -319,7 +319,7 @@ func (d *dumper) dump(ctx context.Context) {
 	workers, ctx := errgroup.WithContext(ctx)
 	workers.Go(func() error {
 		defer close(d.scrolledCh)
-		return d.scroll(ctx, scrollers)
+		return scroll(ctx, scrollers)
 	})
 	workers.Go(func() error {
 		return d.write(ctx)
@@ -327,7 +327,9 @@ func (d *dumper) dump(ctx context.Context) {
 
 	stopDumpStatus := d.dumpStatus()
 	err := workers.Wait()
-	d.out.Flush()
+	if flushErr := d.out.Flush(); flushErr != nil {
+		log.Error("flushing output", "err", flushErr)
+	}
 	stopDumpStatus()
 
 	took := time.Since(d.start)
