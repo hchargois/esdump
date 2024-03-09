@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -17,6 +16,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/log"
+	json "github.com/json-iterator/go"
 	"github.com/spf13/pflag"
 	"golang.org/x/sync/errgroup"
 )

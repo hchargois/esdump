@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -10,6 +9,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/log"
+	json "github.com/json-iterator/go"
 	"golang.org/x/sync/errgroup"
 )
 
