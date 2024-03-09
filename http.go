@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -9,13 +10,44 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/log"
+	json "github.com/json-iterator/go"
 )
+
+// bufferPool is a pool of reusable buffers. Similar to sync.Pool, except it
+// reliably keeps objects around forever, contrary to sync.Pool which has a
+// tendency of deallocating them much too soon, which means that buffers would
+// need to be reallocated and grow from their initial size much too often.
+type bufferPool struct {
+	elems []*bytes.Buffer
+	mu    sync.Mutex
+}
+
+func (p *bufferPool) Get() *bytes.Buffer {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.elems) == 0 {
+		// start with a reasonably large buffer, as we can expect responses
+		// to be quite big
+		return bytes.NewBuffer(make([]byte, 0, 64*1024))
+	}
+	elem := p.elems[len(p.elems)-1]
+	p.elems = p.elems[:len(p.elems)-1]
+	return elem
+}
+
+func (p *bufferPool) Put(elem *bytes.Buffer) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.elems = append(p.elems, elem)
+}
 
 type httpClient struct {
 	*http.Client
 	baseURL string
+	bufPool bufferPool
 }
 
 func (d *dumper) certPool() *x509.CertPool {
@@ -59,7 +91,12 @@ func (d *dumper) initHTTPClient() {
 	}
 }
 
-func (cl httpClient) Do(ctx context.Context, method, path string, body string) (int, []byte, error) {
+// Do sends the request. If dst is non-nil, and the response is 200 OK,  the
+// body of the response will be unmarshalled into it, and the returned byte
+// array will NOT be returned (i.e. will be nil), in order for the buffer to be
+// re-used for subsequent requests. If the response is anything other than 200,
+// the byte array of the raw response body will be returned.
+func (cl *httpClient) Do(ctx context.Context, method, path string, body string, dst any) (int, []byte, error) {
 	var bodyRdr io.Reader
 	if body != "" {
 		bodyRdr = strings.NewReader(body)
@@ -78,17 +115,32 @@ func (cl httpClient) Do(ctx context.Context, method, path string, body string) (
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	buf := cl.bufPool.Get()
+	_, err = buf.ReadFrom(resp.Body)
 	if err != nil {
 		return 0, nil, fmt.Errorf("reading response body: %w", err)
 	}
-	return resp.StatusCode, respBody, nil
+
+	bs := buf.Bytes()
+	if resp.StatusCode != http.StatusOK {
+		return resp.StatusCode, bs, nil
+	}
+
+	if dst != nil {
+		err = json.Unmarshal(bs, &dst)
+		if err != nil {
+			return 0, nil, fmt.Errorf("unmarshaling response body %s: %w", string(bs), err)
+		}
+	}
+	buf.Reset()
+	cl.bufPool.Put(buf)
+	return resp.StatusCode, nil, nil
 }
 
-func (cl httpClient) Get(ctx context.Context, path string, body string) (int, []byte, error) {
-	return cl.Do(ctx, http.MethodGet, path, body)
+func (cl *httpClient) Get(ctx context.Context, path string, body string, dst any) (int, []byte, error) {
+	return cl.Do(ctx, http.MethodGet, path, body, dst)
 }
 
-func (cl httpClient) Delete(ctx context.Context, path string, body string) (int, []byte, error) {
-	return cl.Do(ctx, http.MethodDelete, path, body)
+func (cl *httpClient) Delete(ctx context.Context, path string, body string, dst any) (int, []byte, error) {
+	return cl.Do(ctx, http.MethodDelete, path, body, dst)
 }

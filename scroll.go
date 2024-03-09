@@ -86,12 +86,12 @@ func (d *dumper) clearScrollContext(scrollID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	status, _, err := d.cl.Delete(ctx, "_search/scroll/"+scrollID, "")
+	status, raw, err := d.cl.Delete(ctx, "_search/scroll/"+scrollID, "", nil)
 	if err != nil {
 		log.Error("clearing scroll context", "err", err)
 	}
 	if status != http.StatusOK {
-		log.Error("clearing scroll context", "code", status)
+		log.Error("clearing scroll context", "code", status, "response", string(raw))
 	}
 }
 
@@ -137,6 +137,12 @@ func (d *dumper) scrollQuery(sliceIdx, sliceTotal int) string {
 	return string(b)
 }
 
+type scrollResp interface {
+	GetHits() []json.RawMessage
+	GetScrollID() string
+	GetTotal() uint64
+}
+
 type scrollRespMetadata struct {
 	Hits struct {
 		Total struct {
@@ -147,7 +153,19 @@ type scrollRespMetadata struct {
 	ScrollID string `json:"_scroll_id"`
 }
 
-type scrollResp struct {
+func (r scrollRespMetadata) GetHits() []json.RawMessage {
+	return r.Hits.Hits
+}
+
+func (r scrollRespMetadata) GetScrollID() string {
+	return r.ScrollID
+}
+
+func (r scrollRespMetadata) GetTotal() uint64 {
+	return r.Hits.Total.Value
+}
+
+type scrollRespSourceOnly struct {
 	Hits struct {
 		Total struct {
 			Value uint64 `json:"value"`
@@ -159,8 +177,31 @@ type scrollResp struct {
 	ScrollID string `json:"_scroll_id"`
 }
 
+func (r scrollRespSourceOnly) GetHits() []json.RawMessage {
+	hits := make([]json.RawMessage, len(r.Hits.Hits))
+	for i, hit := range r.Hits.Hits {
+		hits[i] = hit.Source
+	}
+	return hits
+}
+
+func (r scrollRespSourceOnly) GetScrollID() string {
+	return r.ScrollID
+}
+
+func (r scrollRespSourceOnly) GetTotal() uint64 {
+	return r.Hits.Total.Value
+}
+
 func (d *dumper) scrollRequest(ctx context.Context, path, query string) (string, uint64, bool, error) {
-	status, respJSON, err := d.cl.Get(ctx, path, query)
+	var resp scrollResp
+	if d.metadata || d.metadataOnly {
+		resp = &scrollRespMetadata{}
+	} else {
+		resp = &scrollRespSourceOnly{}
+	}
+
+	status, raw, err := d.cl.Get(ctx, path, query, resp)
 	if err != nil {
 		if !errors.Is(err, context.Canceled) {
 			log.Error("sending scroll request", "err", err)
@@ -169,43 +210,11 @@ func (d *dumper) scrollRequest(ctx context.Context, path, query string) (string,
 	}
 
 	if status != http.StatusOK {
-		log.Error("got unexpected status code", "code", status, "response", string(respJSON))
+		log.Error("got unexpected status code", "code", status, "response", string(raw))
 		return "", 0, false, errors.New("unexpected status code")
 	}
 
-	var hits []json.RawMessage
-	var scrollID string
-	var totalHits uint64
-
-	if d.metadata || d.metadataOnly {
-		var resp scrollRespMetadata
-		err = json.Unmarshal(respJSON, &resp)
-		if err != nil {
-			log.Error("unmarshaling scroll response", "err", err)
-			return "", 0, false, err
-		}
-		hits = resp.Hits.Hits
-		scrollID = resp.ScrollID
-		totalHits = resp.Hits.Total.Value
-	} else {
-		var resp scrollResp
-		err = json.Unmarshal(respJSON, &resp)
-		if err != nil {
-			log.Error("unmarshaling scroll response", "err", err)
-			return "", 0, false, err
-		}
-		hits = make([]json.RawMessage, len(resp.Hits.Hits))
-		for i, hit := range resp.Hits.Hits {
-			hits[i] = hit.Source
-		}
-		scrollID = resp.ScrollID
-		totalHits = resp.Hits.Total.Value
-	}
-
+	hits := resp.GetHits()
 	err = d.sendHits(hits)
-	if err != nil {
-		return scrollID, totalHits, false, err
-	}
-
-	return scrollID, totalHits, len(hits) == d.size, nil
+	return resp.GetScrollID(), resp.GetTotal(), len(hits) == d.size, err
 }

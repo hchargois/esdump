@@ -220,7 +220,8 @@ type indexShardsResp map[string]struct {
 }
 
 func (d *dumper) getIndexShards(ctx context.Context) map[string]int {
-	status, respJSON, err := d.cl.Get(ctx, d.target+"/_settings", "")
+	var resp indexShardsResp
+	status, raw, err := d.cl.Get(ctx, d.target+"/_settings", "", &resp)
 	if err != nil {
 		log.Fatal("unable to get index settings, are you sure the URL is correct?", "err", err)
 	}
@@ -228,13 +229,7 @@ func (d *dumper) getIndexShards(ctx context.Context) map[string]int {
 		log.Fatal("index target not found, are you sure the URL & target are correct?")
 	}
 	if status != http.StatusOK {
-		log.Fatal("got unexpected status code, are you sure the URL is correct?", "code", status)
-	}
-
-	var resp indexShardsResp
-	err = json.Unmarshal(respJSON, &resp)
-	if err != nil {
-		log.Fatal("parsing index settings response", "err", err)
+		log.Fatal("got unexpected status code, are you sure the URL is correct?", "code", status, "response", string(raw))
 	}
 
 	indexShards := make(map[string]int)
