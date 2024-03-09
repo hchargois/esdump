@@ -152,15 +152,15 @@ To use a username and password, simply include them in the URL:
 
 Against what seems to be the most popular alternative, [elasticsearch-dump/elasticsearch-dump](https://github.com/elasticsearch-dump/elasticsearch-dump) (7k+ stars!)
 
-Dumping an index that has 2 million documents of around 500 bytes each, in 8 shards, on a single node (a desktop computer) on localhost.
+Dumping an index that has 2 million documents of around 500 bytes each, in 10 shards, on a single node (a desktop computer) on localhost.
 
 | command | time | speed |
 | ------- | ---- | ----- |
 | `elasticdump --input=http://localhost:9200/testindex1 --output=out.json` | 5 hours 33 min | 100 docs/s |
-| `esdump http://localhost testindex1 > out.json` (default, 4x throttling) | 18.49 s | 108158 docs/s |
-| `esdump http://localhost testindex1 -t0 > out.json` (no throttling) | 3.79 s | 527879 docs/s |
+| `esdump http://localhost testindex1 > out.json` (default, 4x throttling) | 7.28 s | 274 774 docs/s |
+| `esdump http://localhost testindex1 -t0 > out.json` (no throttling) | 1.67 s | 1 199 154 docs/s |
 
-No, there is no error. `esdump` really is _five thousand times_ faster than `elasticdump`.
+No, there is no error. `esdump` really is _ten thousand times_ faster than `elasticdump`.
 The (main) reason is that `elasticdump` has an insane throttling of 5 requests every 5 seconds.
 And the worst part of it? It is hardcoded, so it can't be configured, and it's also undocumented.
 Yep. It's that bad.
