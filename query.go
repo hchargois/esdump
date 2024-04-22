@@ -29,8 +29,12 @@ func (d *dumper) createQuery() {
 	}
 
 	if _, ok := q["_source"]; !ok && d.fields != "" {
-		fields, exclude := strings.CutPrefix(d.fields, "^")
-		fieldsList := strings.Split(fields, ",")
+		exclude := false
+		if strings.HasPrefix(d.fields, "^") {
+			exclude = true
+			d.fields = d.fields[1:]
+		}
+		fieldsList := strings.Split(d.fields, ",")
 		if exclude {
 			q["_source"] = obj{
 				"excludes": fieldsList,
