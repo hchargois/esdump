@@ -10,15 +10,21 @@ import (
 	"github.com/mattn/go-isatty"
 )
 
+const maxStdinQuerySize = 10 * 1024 * 1024 // 10MB limit for stdin queries
+
 type obj map[string]any
 
 func (d *dumper) createQuery() {
 	q := make(obj)
 
 	if !isatty.IsTerminal(os.Stdin.Fd()) {
-		in, err := io.ReadAll(os.Stdin)
+		limitedReader := io.LimitReader(os.Stdin, maxStdinQuerySize+1)
+		in, err := io.ReadAll(limitedReader)
 		if err != nil {
 			log.Fatal("reading from stdin", "err", err)
+		}
+		if len(in) > maxStdinQuerySize {
+			log.Fatal("query from stdin exceeds maximum size", "max_bytes", maxStdinQuerySize, "received_bytes", len(in))
 		}
 		log.Info("read query from stdin", "bytes", len(in))
 
