@@ -47,7 +47,16 @@ func (d *dumper) scrollSlice(ctx context.Context, index string, sliceIdx, sliceT
 	var newScrollID string
 	for {
 		reqStart := time.Now()
-		q = fmt.Sprintf(`{"scroll": "%s", "scroll_id": "%s"}`, d.scrollTimeoutES, scrollID)
+		scrollReq := map[string]string{
+			"scroll":    d.scrollTimeoutES,
+			"scroll_id": scrollID,
+		}
+		qBytes, err := json.Marshal(scrollReq)
+		if err != nil {
+			d.clearScrollContext(scrollID)
+			return fmt.Errorf("marshaling scroll request: %w", err)
+		}
+		q = string(qBytes)
 		newScrollID, _, more, err = d.scrollRequest(ctx, "_search/scroll", q)
 		if err != nil || !more {
 			break
