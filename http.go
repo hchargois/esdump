@@ -1,3 +1,4 @@
+// Package main provides esdump, a CLI tool to dump Elasticsearch index documents.
 package main
 
 import (
@@ -69,12 +70,19 @@ func (d *dumper) certPool() *x509.CertPool {
 }
 
 func (d *dumper) initHTTPClient() {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
+	var transport *http.Transport
+	if defaultTransport, ok := http.DefaultTransport.(*http.Transport); ok {
+		transport = defaultTransport.Clone()
+	} else {
+		transport = &http.Transport{}
+	}
 	if d.noCompression {
 		transport.DisableCompression = true
 	}
 
-	transport.TLSClientConfig = &tls.Config{}
+	transport.TLSClientConfig = &tls.Config{
+		MinVersion: tls.VersionTLS12,
+	}
 	if d.verify == "no" {
 		log.Info("skipping TLS verification")
 		transport.TLSClientConfig.InsecureSkipVerify = true
@@ -113,7 +121,11 @@ func (cl *httpClient) Do(ctx context.Context, method, path string, body string, 
 	if err != nil {
 		return 0, nil, fmt.Errorf("sending request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Warn("closing response body", "err", closeErr)
+		}
+	}()
 
 	buf := cl.bufPool.Get()
 	_, err = buf.ReadFrom(resp.Body)
