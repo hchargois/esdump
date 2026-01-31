@@ -46,9 +46,7 @@ type dumper struct {
 	scrolled        uint64
 	dumped          uint64
 	scrolledCh      chan json.RawMessage
-
-	totalHitsPending int32
-	totalHits        uint64
+	totalHitsCtr    *GroupCounter
 }
 
 func main() {
@@ -290,7 +288,7 @@ func (d *dumper) initScrollers(indexShards map[string]int) []func(context.Contex
 		}
 	}
 
-	d.totalHitsPending = int32(len(scrollers))
+	d.totalHitsCtr = NewGroupCounter(len(scrollers))
 
 	return scrollers
 }
@@ -361,9 +359,7 @@ func (d *dumper) dumpStatus() func() {
 				dumped := atomic.LoadUint64(&d.dumped)
 
 				stats := []any{"dumped", dumped}
-				if atomic.LoadInt32(&d.totalHitsPending) == 0 {
-					totalHits := atomic.LoadUint64(&d.totalHits)
-
+				if totalHits, ok := d.totalHitsCtr.Get(); ok {
 					toDump := totalHits
 					if d.count > 0 && toDump >= d.count {
 						toDump = d.count
@@ -374,7 +370,6 @@ func (d *dumper) dumpStatus() func() {
 						"total_hits", totalHits,
 						"progress", fmt.Sprintf("%.2f%%", progress*100),
 					)
-
 				}
 				log.Info("dumping...", stats...)
 			}

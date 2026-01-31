@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -29,8 +30,7 @@ func (d *dumper) scrollSlice(ctx context.Context, index string, sliceIdx, sliceT
 
 	reqStart := time.Now()
 	scrollID, totalHits, more, err := d.scrollRequest(ctx, index+"/_search?scroll="+d.scrollTimeoutES, q)
-	atomic.AddUint64(&d.totalHits, totalHits)
-	atomic.AddInt32(&d.totalHitsPending, -1)
+	d.totalHitsCtr.Report(totalHits)
 	defer func() {
 		d.clearScrollContext(scrollID)
 	}()
@@ -223,4 +223,35 @@ func (d *dumper) scrollRequest(ctx context.Context, path, query string) (string,
 	hits := resp.GetHits()
 	limitReached := d.sendHits(hits)
 	return resp.GetScrollID(), resp.GetTotal(), len(hits) == d.size && !limitReached, err
+}
+
+// GroupCounter is a counter that aggregates counts from a given number of
+// goroutines. Each goroutine must call Report() exactly once.
+type GroupCounter struct {
+	cnt     uint64
+	pending int
+	mu      sync.RWMutex
+}
+
+func NewGroupCounter(n int) *GroupCounter {
+	return &GroupCounter{
+		pending: n,
+	}
+}
+
+func (gc *GroupCounter) Report(cnt uint64) {
+	gc.mu.Lock()
+	defer gc.mu.Unlock()
+	gc.pending--
+	if gc.pending < 0 {
+		panic("GroupCounter pending < 0")
+	}
+	gc.cnt += cnt
+}
+
+// Get returns the current count and whether all goroutines have reported.
+func (gc *GroupCounter) Get() (uint64, bool) {
+	gc.mu.RLock()
+	defer gc.mu.RUnlock()
+	return gc.cnt, gc.pending == 0
 }
