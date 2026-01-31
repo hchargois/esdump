@@ -151,7 +151,13 @@ Flags:
 		os.Exit(1)
 	}
 
-	d.validateFlags(usage)
+	if errs := d.validateFlags(); len(errs) > 0 {
+		for _, err := range errs {
+			log.Error(err)
+		}
+		usage()
+		os.Exit(1)
+	}
 
 	if esURL.Port() == "" {
 		esURL.Host = fmt.Sprintf("%s:9200", esURL.Host)
@@ -169,7 +175,7 @@ Flags:
 	d.dump(ctx)
 }
 
-func (d *dumper) validateFlags(usage func()) {
+func (d *dumper) validateFlags() []string {
 	var errs []string
 	if d.throttle < 0 {
 		errs = append(errs, "throttle must be >= 0")
@@ -189,13 +195,7 @@ func (d *dumper) validateFlags(usage func()) {
 	if d.metadataOnly && d.fields != "" {
 		errs = append(errs, "metadata-only and fields are mutually exclusive")
 	}
-	if len(errs) > 0 {
-		for _, err := range errs {
-			log.Error(err)
-		}
-		usage()
-		os.Exit(1)
-	}
+	return errs
 }
 
 func isLoopback(host string) bool {
