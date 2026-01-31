@@ -13,8 +13,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-var errCountReached = errors.New("count reached")
-
 func scroll(ctx context.Context, scrollers []func(context.Context) error) error {
 	grp, ctx := errgroup.WithContext(ctx)
 	for _, scroller := range scrollers {
@@ -23,11 +21,7 @@ func scroll(ctx context.Context, scrollers []func(context.Context) error) error 
 			return scroller(ctx)
 		})
 	}
-	err := grp.Wait()
-	if errors.Is(err, errCountReached) {
-		return nil
-	}
-	return err
+	return grp.Wait()
 }
 
 func (d *dumper) scrollSlice(ctx context.Context, index string, sliceIdx, sliceTotal int) error {
@@ -37,12 +31,13 @@ func (d *dumper) scrollSlice(ctx context.Context, index string, sliceIdx, sliceT
 	scrollID, totalHits, more, err := d.scrollRequest(ctx, index+"/_search?scroll="+d.scrollTimeoutES, q)
 	atomic.AddUint64(&d.totalHits, totalHits)
 	atomic.AddInt32(&d.totalHitsPending, -1)
-	if err != nil || !more {
+	defer func() {
 		d.clearScrollContext(scrollID)
+	}()
+	if err != nil || !more {
 		return err
 	}
 
-	var newScrollID string
 	for {
 		cancelableSleep(ctx, d.throttlingDuration(time.Since(reqStart)))
 		scrollReq := map[string]string{
@@ -51,25 +46,28 @@ func (d *dumper) scrollSlice(ctx context.Context, index string, sliceIdx, sliceT
 		}
 		qBytes, err := json.Marshal(scrollReq)
 		if err != nil {
-			d.clearScrollContext(scrollID)
 			return fmt.Errorf("marshaling scroll request: %w", err)
 		}
 		q = string(qBytes)
 		reqStart = time.Now()
-		newScrollID, _, more, err = d.scrollRequest(ctx, "_search/scroll", q)
-		if err != nil || !more {
-			break
+		// do not immediately overwrite the scrollID, in case of error
+		// we want to clear the previous one
+		newScrollID, _, more, err := d.scrollRequest(ctx, "_search/scroll", q)
+		if err != nil {
+			return err
 		}
 		scrollID = newScrollID
+		if !more {
+			return nil
+		}
 	}
-	d.clearScrollContext(scrollID)
-	return err
 }
 
-func (d *dumper) sendHits(hits []json.RawMessage) error {
+// sendHits sends hits to the output and returns whether the count limit has been reached.
+func (d *dumper) sendHits(hits []json.RawMessage) bool {
 	scrolled := atomic.LoadUint64(&d.scrolled)
 	if d.count > 0 && scrolled >= d.count {
-		return errCountReached
+		return true
 	}
 
 	for _, hit := range hits {
@@ -77,11 +75,7 @@ func (d *dumper) sendHits(hits []json.RawMessage) error {
 	}
 
 	scrolled = atomic.AddUint64(&d.scrolled, uint64(len(hits)))
-	if d.count > 0 && scrolled >= d.count {
-		return errCountReached
-	}
-
-	return nil
+	return d.count > 0 && scrolled >= d.count
 }
 
 func (d *dumper) clearScrollContext(scrollID string) {
@@ -227,6 +221,6 @@ func (d *dumper) scrollRequest(ctx context.Context, path, query string) (string,
 	}
 
 	hits := resp.GetHits()
-	err = d.sendHits(hits)
-	return resp.GetScrollID(), resp.GetTotal(), len(hits) == d.size, err
+	limitReached := d.sendHits(hits)
+	return resp.GetScrollID(), resp.GetTotal(), len(hits) == d.size && !limitReached, err
 }
