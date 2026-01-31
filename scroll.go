@@ -42,11 +42,9 @@ func (d *dumper) scrollSlice(ctx context.Context, index string, sliceIdx, sliceT
 		return err
 	}
 
-	d.sleepForThrottling(ctx, time.Since(reqStart))
-
 	var newScrollID string
 	for {
-		reqStart := time.Now()
+		cancelableSleep(ctx, d.throttlingDuration(time.Since(reqStart)))
 		scrollReq := map[string]string{
 			"scroll":    d.scrollTimeoutES,
 			"scroll_id": scrollID,
@@ -57,12 +55,12 @@ func (d *dumper) scrollSlice(ctx context.Context, index string, sliceIdx, sliceT
 			return fmt.Errorf("marshaling scroll request: %w", err)
 		}
 		q = string(qBytes)
+		reqStart = time.Now()
 		newScrollID, _, more, err = d.scrollRequest(ctx, "_search/scroll", q)
 		if err != nil || !more {
 			break
 		}
 		scrollID = newScrollID
-		d.sleepForThrottling(ctx, time.Since(reqStart))
 	}
 	d.clearScrollContext(scrollID)
 	return err
@@ -104,9 +102,19 @@ func (d *dumper) clearScrollContext(scrollID string) {
 	}
 }
 
-func (d *dumper) sleepForThrottling(ctx context.Context, reqDuration time.Duration) {
-	if d.throttle <= 0 {
+func cancelableSleep(ctx context.Context, d time.Duration) {
+	if d <= 0 {
 		return
+	}
+	select {
+	case <-ctx.Done():
+	case <-time.After(d):
+	}
+}
+
+func (d *dumper) throttlingDuration(reqDuration time.Duration) time.Duration {
+	if d.throttle <= 0 {
+		return 0
 	}
 
 	delay := time.Duration(d.throttle * float32(reqDuration))
@@ -117,12 +125,7 @@ func (d *dumper) sleepForThrottling(ctx context.Context, reqDuration time.Durati
 	if delay > maxDelay {
 		delay = maxDelay
 	}
-
-	// use time.After instead of time.Sleep so it can be canceled by the context
-	select {
-	case <-ctx.Done():
-	case <-time.After(delay):
-	}
+	return delay
 }
 
 func (d *dumper) scrollQuery(sliceIdx, sliceTotal int) string {
