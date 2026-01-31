@@ -16,7 +16,6 @@ import (
 func scroll(ctx context.Context, scrollers []func(context.Context) error) error {
 	grp, ctx := errgroup.WithContext(ctx)
 	for _, scroller := range scrollers {
-		scroller := scroller
 		grp.Go(func() error {
 			return scroller(ctx)
 		})

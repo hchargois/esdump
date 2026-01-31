@@ -160,7 +160,7 @@ Flags:
 	}
 
 	if esURL.Port() == "" {
-		esURL.Host = fmt.Sprintf("%s:9200", esURL.Host)
+		esURL.Host += ":9200"
 	}
 	if isLoopback(esURL.Hostname()) {
 		log.Info("detected loopback address, disabling compression")
@@ -272,25 +272,30 @@ func (d *dumper) init() {
 func (d *dumper) initScrollers(indexShards map[string]int) []func(context.Context) error {
 	var scrollers []func(context.Context) error
 	for idxName, shards := range indexShards {
-		idxName := idxName
-		shards := shards
-
 		slices := d.slices
 		if slices > shards {
 			slices = shards
 		}
 
 		log.Info("dumping", "index", idxName, "shards", shards, "slices", slices)
-		for i := 0; i < slices; i++ {
-			i := i
-
+		for i := range slices {
 			scrollers = append(scrollers, func(ctx context.Context) error {
 				return d.scrollSlice(ctx, idxName, i, slices)
 			})
 		}
 	}
 
-	d.totalHitsPending = int32(len(scrollers))
+	const maxInt32 = int32(^uint32(0) >> 1)
+	scrollersLen := len(scrollers)
+	if scrollersLen > 0 && scrollersLen <= int(maxInt32) {
+		if scrollersLen <= int(^int32(0)>>1) {
+			d.totalHitsPending = int32(scrollersLen)
+		} else {
+			d.totalHitsPending = maxInt32
+		}
+	} else {
+		d.totalHitsPending = maxInt32
+	}
 
 	return scrollers
 }
@@ -374,7 +379,6 @@ func (d *dumper) dumpStatus() func() {
 						"total_hits", totalHits,
 						"progress", fmt.Sprintf("%.2f%%", progress*100),
 					)
-
 				}
 				log.Info("dumping...", stats...)
 			}

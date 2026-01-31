@@ -1,0 +1,51 @@
+name: golang
+run-name: "Golang workflow on ${{ github.ref_type }} ${{ github.ref_name }}"
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: ${{ github.ref_type == 'branch' && github.ref != 'refs/heads/master' && github.ref != 'refs/heads/develop' }}
+
+env:
+  CGO_ENABLED: 0
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  quality:
+    if: github.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    name: Run quality pipeline
+    env:
+      CGO_ENABLED: 1
+    steps:
+      - uses: actions/checkout@v4
+        name: checkout
+        with:
+          fetch-depth: 0
+
+      - name: setup golang
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.25"
+
+      - uses: wagoid/commitlint-github-action@v6
+        name: commit lint
+
+      - uses: golangci/golangci-lint-action@v8
+        name: code lint
+        with:
+          version: latest
+          skip-cache: true
+
+      - run: go test -race ./...
+        name: all tests
